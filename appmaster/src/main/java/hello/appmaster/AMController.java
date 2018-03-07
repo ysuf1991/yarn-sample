@@ -1,5 +1,6 @@
 package hello.appmaster;
 
+import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,5 +25,10 @@ public class AMController {
                                         @RequestParam(required = false, defaultValue = "1") int vCores) {
 
         return appMaster.submit(count, memory, vCores).stream().map(ContainerInfo::new).collect(Collectors.toList());
+    }
+
+    @PostMapping
+    public FinalApplicationStatus shutdown() {
+        return appMaster.shutdown();
     }
 }

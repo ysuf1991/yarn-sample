@@ -1,13 +1,16 @@
 package hello.appmaster;
 
+import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.FAILED;
 import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.KILLED;
 import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.SUCCEEDED;
+import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.UNDEFINED;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
+import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
 import org.apache.hadoop.yarn.client.api.AMRMClient;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.springframework.stereotype.Component;
@@ -42,24 +45,26 @@ public class AppMaster {
         return allocated;
     }
 
-    public void release() {
+    public FinalApplicationStatus shutdown() {
+        FinalApplicationStatus status = UNDEFINED;
         try {
             List<ContainerId> ids = amrmClient.allocate(0)
                 .getCompletedContainersStatuses()
                 .stream().map(ContainerStatus::getContainerId)
                 .collect(Collectors.toList());
 
-            boolean succses = allocatedContainers.values()
+            boolean finished = allocatedContainers.values()
                 .stream()
                 .flatMap(Collection::stream)
                 .allMatch(c -> ids.contains(c.getId()));
+            status = finished ? SUCCEEDED : KILLED;
             amrmClient.stop();
-            amrmClient.unregisterApplicationMaster(succses ? SUCCEEDED : KILLED, "", "");
-
+            amrmClient.unregisterApplicationMaster(status, "", "");
         } catch (YarnException | IOException e) {
             log.info("Failed when shutdown");
         } finally {
             amrmClient.stop();
         }
+        return status;
     }
 }
