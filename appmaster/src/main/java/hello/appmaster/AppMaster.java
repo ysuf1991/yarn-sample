@@ -1,81 +1,65 @@
 package hello.appmaster;
 
+import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.KILLED;
+import static org.apache.hadoop.yarn.api.records.FinalApplicationStatus.SUCCEEDED;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
-import org.apache.hadoop.yarn.api.records.Priority;
-import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.api.records.Container;
+import org.apache.hadoop.yarn.api.records.ContainerId;
+import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.client.api.AMRMClient;
-import org.apache.hadoop.yarn.client.api.NMClient;
-import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.util.Records;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public class AppMaster {
+
     private static final Log log = LogFactory.getLog(AppMaster.class);
-    public void sub() throws Exception {
-        // Initialize clients to ResourceManager and NodeManagers
-        Configuration conf = new YarnConfiguration();
 
-        AMRMClient<AMRMClient.ContainerRequest> rmClient = AMRMClient.createAMRMClient();
-        rmClient.init(conf);
-        rmClient.start();
+    private final AMRMClient amrmClient;
 
-        NMClient nmClient = NMClient.createNMClient();
-        nmClient.init(conf);
-        nmClient.start();
+    private final ContainerLauncher containerLauncher;
 
-        // Register with ResourceManager
-        log.info("registerApplicationMaster 0");
-        rmClient.registerApplicationMaster("", 0, "");
-        log.info("registerApplicationMaster 1");
+    private final Map<Long, List<Container>> allocatedContainers = new HashMap<>();
 
-        // Priority for worker containers - priorities are intra-application
-        Priority priority = Records.newRecord(Priority.class);
-        priority.setPriority(0);
+    public AppMaster(AMRMClient amrmClient, ContainerLauncher containerLauncher) {
+        this.amrmClient = amrmClient;
+        this.containerLauncher = containerLauncher;
+    }
 
-        // Resource requirements for worker containers
-        Resource capability = Records.newRecord(Resource.class);
-        capability.setMemory(128);
-        capability.setVirtualCores(1);
+    public List<Container> submit(int count, int memory, int vCores) {
+        List<Container> allocated = containerLauncher.allocate(count, memory, vCores);
+        allocatedContainers.put(Instant.now().getEpochSecond(), allocated);
+        return allocated;
+    }
 
-        // Make container requests to ResourceManager
-//        for (int i = 0; i < 1; ++i) {
-//            AMRMClient.ContainerRequest containerAsk = new AMRMClient.ContainerRequest(capability, null, null, priority);
-//            log.info("Making res-req " + i);
-//            rmClient.addContainerRequest(containerAsk);
-//        }
+    public void release() {
+        try {
+            List<ContainerId> ids = amrmClient.allocate(0)
+                .getCompletedContainersStatuses()
+                .stream().map(ContainerStatus::getContainerId)
+                .collect(Collectors.toList());
 
-        // Obtain allocated containers, launch and check for responses
-//        int responseId = 0;
-//        int completedContainers = 0;
-//        while (completedContainers < n) {
-//            AllocateResponse response = rmClient.allocate(responseId++);
-//            for (Container container : response.getAllocatedContainers()) {
-//                // Launch container by create ContainerLaunchContext
-//                ContainerLaunchContext ctx =
-//                    Records.newRecord(ContainerLaunchContext.class);
-//                ctx.setCommands(
-//                    Collections.singletonList(
-//                        command +
-//                        " 1>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stdout" +
-//                        " 2>" + ApplicationConstants.LOG_DIR_EXPANSION_VAR + "/stderr"
-//                    ));
-//                log.info("Launching container " + container.getId());
-//                nmClient.startContainer(container, ctx);
-//            }
-//            for (ContainerStatus status : response.getCompletedContainersStatuses()) {
-//                ++completedContainers;
-//                log.info("Completed container " + status.getContainerId());
-//            }
-//            Thread.sleep(100);
-//        }
+            boolean succses = allocatedContainers.values()
+                .stream()
+                .flatMap(Collection::stream)
+                .allMatch(c -> ids.contains(c.getId()));
+            amrmClient.stop();
+            amrmClient.unregisterApplicationMaster(succses ? SUCCEEDED : KILLED, "", "");
 
-        // Un-register with ResourceManager
-        rmClient.unregisterApplicationMaster(
-            FinalApplicationStatus.SUCCEEDED, "", "");
-        Thread.sleep(1000);
+        } catch (YarnException | IOException e) {
+            log.info("Failed when shutdown");
+        } finally {
+            amrmClient.stop();
+        }
     }
 }

@@ -13,8 +13,6 @@ import org.springframework.yarn.boot.YarnContainerAutoConfiguration;
 public class AppmasterApplication {
 
 	public static void main(String[] args) throws Exception {
-            ConfigurableApplicationContext run = SpringApplication.run(AppmasterApplication.class, args);
-            run.getBean(AppMaster.class).sub();
-            run.stop();
+            SpringApplication.run(AppmasterApplication.class, args);
 	}
 }
